@@ -1,0 +1,33 @@
+abnormalities, spandan, present, match
+Sinus Tachycardia, Sinus Tachycardia, yes, no
+Sinus Bradycardia, Sinus Bradycardia, yes, no
+Atrial Fibrillation, Atrial Fibrillation, yes, no
+Atrial Flutter, Atrial Flutter, yes, no
+Atrial Tachycardia, Atrial Tachycardia, yes, no
+SVT, SVT, yes, no
+AV BLOCK, AV BLOCK, yes, no
+High AV BLOCK, High AV BLOCK, yes, no
+WPW Syndrome, WPW Syndrome, yes, no
+Junctional Rythm, Junctional Rythm, yes, no
+Atrial Ectopics, Atrial Ectopics, yes, no
+absent, Ventricular Ectopics, no, no
+absent, Antero Septal MI, no, no
+absent, Antero Apical MI, no, no
+absent, Antero Lateral MI, no, no
+absent, Lateral Wall MI, no, no
+absent, Inferior Wall MI, no, no
+absent, Inferior Lateral MI, no, no
+absent, Evolved / Old MI, no, no
+absent, Ischaemic ST-T changes, no, no
+absent, Right Bundle Branch Block, no, no
+absent, Left Bundle Branch Block, no, no
+absent, Right Ventricular Hypertrophy, no, no
+absent, Left Ventricular Hypertrophy, no, no
+Asystole, absent, no, no
+NSVT, absent, no, no
+Ventricular Tachycardia, absent, no, no
+Sinus Arrest, absent, no, no
+Ventricular Fibrillation, absent, no, no
+Ventricular Flutter, absent, no, no
+Ventricular Bigeminy, absent, no, no
+Ventricular Trigeminy, absent, no, no
