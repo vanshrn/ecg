@@ -178,28 +178,45 @@ def run_live_plot():
         line_filt.set_ydata(filt_buffer)
         
         filt_array = np.array(filt_buffer)
+        
+        # --- PQRST DYNAMIC DETECTION ALGORITHM ---
+        # We process a 500-sample (2 second) rolling window.
+        # We need a safe margin (150 samples) at the edges to ensure we don't accidentally
+        # lock onto a peak that is partially cut off at the edge of the screen.
         search_margin = 150
+        
         if len(filt_array) > 2 * search_margin:
+            # Step 1: Extract the central "safe" window to find the R-wave
             window = filt_array[search_margin:-search_margin]
             if len(window) > 0:
+                # Step 2: The R-Wave is our anchor. It's the absolute highest peak (ventricular depolarization)
                 r_idx = int(np.argmax(window)) + search_margin
                 
+                # Step 3: Find Q-Wave (The small dip right before R)
+                # Look backwards up to 40 samples (~160ms) and find the local minimum
                 q_start = max(0, r_idx-40)
                 q_search = filt_array[q_start:r_idx]
                 q_idx = int(q_start + np.argmin(q_search)) if len(q_search) > 0 else r_idx
                 
+                # Step 4: Find S-Wave (The small dip right after R)
+                # Look forwards up to 40 samples (~160ms) and find the local minimum
                 s_end = min(len(filt_array), r_idx+40)
                 s_search = filt_array[r_idx:s_end]
                 s_idx = int(r_idx + np.argmin(s_search)) if len(s_search) > 0 else r_idx
                 
+                # Step 5: Find P-Wave (The bump before the QRS complex, atrial depolarization)
+                # Look backwards from the Q-wave up to 80 samples (~320ms) and find the local maximum
                 p_start = max(0, q_idx-80)
                 p_search = filt_array[p_start:q_idx]
                 p_idx = int(p_start + np.argmax(p_search)) if len(p_search) > 0 else q_idx
                 
+                # Step 6: Find T-Wave (The bump after the QRS complex, ventricular repolarization)
+                # Look forwards from the S-wave up to 120 samples (~480ms) and find the local maximum
                 t_end = min(len(filt_array), s_idx+120)
                 t_search = filt_array[s_idx:t_end]
                 t_idx = int(s_idx + np.argmax(t_search)) if len(t_search) > 0 else s_idx
                 
+                # Update the scatter plots on the screen with the newly found X, Y coordinates
                 p_point.set_data([p_idx], [filt_array[p_idx]])
                 q_point.set_data([q_idx], [filt_array[q_idx]])
                 r_point.set_data([r_idx], [filt_array[r_idx]])
