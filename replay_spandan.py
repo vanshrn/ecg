@@ -11,6 +11,7 @@ import threading
 import collections
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import numpy as np
 
 # --- CONFIGURATION ---
 COM_PORT = 'COM5'      # Change to match your ESP32 COM port
@@ -160,6 +161,12 @@ def run_live_plot():
     ax1.legend(loc='upper right')
 
     line_filt, = ax2.plot(filt_buffer, color='cyan', label='Filtered Signal')
+    p_point, = ax2.plot([], [], 'mo', label='P')
+    q_point, = ax2.plot([], [], 'ro', label='Q')
+    r_point, = ax2.plot([], [], 'go', label='R')
+    s_point, = ax2.plot([], [], 'bo', label='S')
+    t_point, = ax2.plot([], [], 'co', label='T')
+    
     ax2.set_ylim(1500, 2600)
     ax2.set_ylabel('Filtered (Centered 2048)')
     ax2.set_xlabel('Samples (Rolling 2 Seconds)')
@@ -170,6 +177,35 @@ def run_live_plot():
         line_raw.set_ydata(raw_buffer)
         line_filt.set_ydata(filt_buffer)
         
+        filt_array = np.array(filt_buffer)
+        search_margin = 150
+        if len(filt_array) > 2 * search_margin:
+            window = filt_array[search_margin:-search_margin]
+            if len(window) > 0:
+                r_idx = int(np.argmax(window)) + search_margin
+                
+                q_start = max(0, r_idx-40)
+                q_search = filt_array[q_start:r_idx]
+                q_idx = int(q_start + np.argmin(q_search)) if len(q_search) > 0 else r_idx
+                
+                s_end = min(len(filt_array), r_idx+40)
+                s_search = filt_array[r_idx:s_end]
+                s_idx = int(r_idx + np.argmin(s_search)) if len(s_search) > 0 else r_idx
+                
+                p_start = max(0, q_idx-80)
+                p_search = filt_array[p_start:q_idx]
+                p_idx = int(p_start + np.argmax(p_search)) if len(p_search) > 0 else q_idx
+                
+                t_end = min(len(filt_array), s_idx+120)
+                t_search = filt_array[s_idx:t_end]
+                t_idx = int(s_idx + np.argmax(t_search)) if len(t_search) > 0 else s_idx
+                
+                p_point.set_data([p_idx], [filt_array[p_idx]])
+                q_point.set_data([q_idx], [filt_array[q_idx]])
+                r_point.set_data([r_idx], [filt_array[r_idx]])
+                s_point.set_data([s_idx], [filt_array[s_idx]])
+                t_point.set_data([t_idx], [filt_array[t_idx]])
+        
         if mode == "1":
             if recording:
                 fig.patch.set_facecolor('#3a1111') # Red background tint when recording
@@ -178,7 +214,7 @@ def run_live_plot():
         else:
             fig.patch.set_facecolor('#112233')    # Blue background tint in replay mode
 
-        return line_raw, line_filt
+        return line_raw, line_filt, p_point, q_point, r_point, s_point, t_point
 
     ani = animation.FuncAnimation(fig, update_fig, interval=30, blit=False, cache_frame_data=False)
     plt.tight_layout()
