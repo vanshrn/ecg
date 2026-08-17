@@ -168,28 +168,27 @@ def run_live_plot():
         line_raw.set_ydata(raw_buffer)
         line_filt.set_ydata(filt_buffer)
         
-        # Dynamic Y-axis scaling for Raw
+        # Dynamic Y-axis scaling for Raw and Filtered signals
         try:
-            # Fixed zoom level (span)
-            fixed_span = 1000.0
+            # Raw Signal Scaling
+            r_min, r_max = min(raw_buffer), max(raw_buffer)
+            if r_max == r_min: r_max = r_min + 1
+            r_pad = max((r_max - r_min) * 0.15, 50) # 15% padding
             
-            # Calculate the current 2-second baseline center
-            r_center = sum(raw_buffer) / len(raw_buffer)
-            
-            # Only update Raw Y-axis if it drifts significantly (prevents jitter)
             current_r_ylim = ax1.get_ylim()
-            current_r_center = (current_r_ylim[0] + current_r_ylim[1]) / 2.0
-            if abs(r_center - current_r_center) > 150 or (current_r_ylim[1] - current_r_ylim[0]) != fixed_span:
-                ax1.set_ylim(r_center - (fixed_span / 2.0), r_center + (fixed_span / 2.0))
+            # Update if limits are exceeded or span is too large
+            if r_min < current_r_ylim[0] + r_pad*0.2 or r_max > current_r_ylim[1] - r_pad*0.2 or (current_r_ylim[1] - current_r_ylim[0]) > (r_max - r_min) * 2.0:
+                ax1.set_ylim(r_min - r_pad, r_max + r_pad)
+
+            # Filtered Signal Scaling
+            f_min, f_max = min(filt_buffer), max(filt_buffer)
+            if f_max == f_min: f_max = f_min + 1
+            f_pad = max((f_max - f_min) * 0.15, 50) # 15% padding
             
-            # Calculate the current Filtered 2-second baseline center
-            f_center = sum(filt_buffer) / len(filt_buffer)
-            
-            # Only update Filtered Y-axis if it drifts significantly
             current_f_ylim = ax2.get_ylim()
-            current_f_center = (current_f_ylim[0] + current_f_ylim[1]) / 2.0
-            if abs(f_center - current_f_center) > 150 or (current_f_ylim[1] - current_f_ylim[0]) != fixed_span:
-                ax2.set_ylim(f_center - (fixed_span / 2.0), f_center + (fixed_span / 2.0))
+            # Update if limits are exceeded or span is too large
+            if f_min < current_f_ylim[0] + f_pad*0.2 or f_max > current_f_ylim[1] - f_pad*0.2 or (current_f_ylim[1] - current_f_ylim[0]) > (f_max - f_min) * 2.0:
+                ax2.set_ylim(f_min - f_pad, f_max + f_pad)
                 
         except Exception:
             pass

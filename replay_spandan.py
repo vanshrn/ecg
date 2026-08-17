@@ -177,6 +177,28 @@ def run_live_plot():
         line_raw.set_ydata(raw_buffer)
         line_filt.set_ydata(filt_buffer)
         
+        # Dynamic Y-axis scaling for Raw and Filtered signals
+        try:
+            # Raw Signal Scaling
+            r_min, r_max = min(raw_buffer), max(raw_buffer)
+            if r_max == r_min: r_max = r_min + 1
+            r_pad = max((r_max - r_min) * 0.15, 50) # 15% padding
+            
+            current_r_ylim = ax1.get_ylim()
+            if r_min < current_r_ylim[0] + r_pad*0.2 or r_max > current_r_ylim[1] - r_pad*0.2 or (current_r_ylim[1] - current_r_ylim[0]) > (r_max - r_min) * 2.0:
+                ax1.set_ylim(r_min - r_pad, r_max + r_pad)
+
+            # Filtered Signal Scaling
+            f_min, f_max = min(filt_buffer), max(filt_buffer)
+            if f_max == f_min: f_max = f_min + 1
+            f_pad = max((f_max - f_min) * 0.15, 50) # 15% padding
+            
+            current_f_ylim = ax2.get_ylim()
+            if f_min < current_f_ylim[0] + f_pad*0.2 or f_max > current_f_ylim[1] - f_pad*0.2 or (current_f_ylim[1] - current_f_ylim[0]) > (f_max - f_min) * 2.0:
+                ax2.set_ylim(f_min - f_pad, f_max + f_pad)
+        except Exception:
+            pass
+
         filt_array = np.array(filt_buffer)
         
         # --- PQRST DYNAMIC DETECTION ALGORITHM ---
