@@ -5,7 +5,19 @@ import matplotlib.pyplot as plt
 from ecg_recorder import record_lead
 
 def calculate_derived_leads(l1, l2):
-    # Ensure they are the same length
+    """
+    Calculates the derived limb leads (Lead III, aVR, aVL, aVF) from Lead I and Lead II.
+    Because the user is recording Lead I and Lead II sequentially (not simultaneously), 
+    subtracting them point-by-point directly will result in misaligned, double-peaked artifacts 
+    due to natural Heart Rate Variability (HRV).
+    
+    To solve this, we use the Clinical "Median Beat" extraction method:
+    1. We run a Pan-Tompkins QRS detector to find the exact peak of every heartbeat.
+    2. We extract a window around every peak and average them to find the "Median Heartbeat".
+    3. We subtract the perfectly aligned Median Heartbeats to derive the other 4 leads.
+    4. We paste these derived median beats back into a synthesized 4-second strip.
+    """
+    # Ensure both arrays are the same length
     length = min(len(l1), len(l2))
     l1 = np.array(l1[:length])
     l2 = np.array(l2[:length])
@@ -14,15 +26,21 @@ def calculate_derived_leads(l1, l2):
     try:
         from scipy import signal
         
-        # Robust QRS detection (Simplified Pan-Tompkins) to prevent locking onto T-waves or P-waves
+        # Robust QRS detection (Simplified Pan-Tompkins algorithm) 
+        # This prevents the peak-finder from accidentally locking onto tall T-waves or P-waves.
         def find_r_peaks(data, fs=250):
+            # 1. Bandpass filter (5-15 Hz) to isolate QRS energy
             b, a = signal.butter(2, [5 / (fs/2), 15 / (fs/2)], btype='bandpass')
             bp = signal.filtfilt(b, a, data)
+            # 2. Derivative and Squaring to highlight the steepest slopes (the R-spike)
             sq = np.diff(bp) ** 2
+            # 3. Moving Average Integration to create single clean humps for each QRS
             w = int(0.15 * fs)
             ma = np.convolve(sq, np.ones(w)/w, mode='same')
+            # 4. Find the peaks of those humps
             peaks, _ = signal.find_peaks(ma, distance=int(fs*0.5), height=np.max(ma)*0.2)
             
+            # 5. Search the original high-passed signal near these humps to find the exact tip of the R-spike
             b_hp, a_hp = signal.butter(1, 0.5 / (fs/2), btype='high')
             clean = signal.filtfilt(b_hp, a_hp, data)
             
@@ -38,27 +56,33 @@ def calculate_derived_leads(l1, l2):
         p1, c1 = find_r_peaks(l1)
         p2, c2 = find_r_peaks(l2)
         
+        # Helper function to extract the window (-75 samples to +125 samples) around every R-peak and average them
         def extract_median_beat(data, peaks, pre=75, post=125):
             beats = [data[p-pre : p+post] for p in peaks if p >= pre and p+post < len(data)]
             return np.median(beats, axis=0) if len(beats) > 0 else None
             
+        # Helper function to paste the median template back into a continuous array at a constant 75 BPM (200 samples)
         def synth_signal(template, total_len, pre=75, rr=200):
             synth = np.zeros(total_len + len(template) + rr)
             for i in range(100, total_len + rr, rr):
                 start_idx = i - pre
                 if start_idx >= 0 and start_idx < total_len:
                     synth[start_idx : start_idx + len(template)] = template
+            # Slice at total_len so we don't have a flat line gap at the end
             return synth[:total_len]
             
+        # Extract the perfectly unstretched Median Beats for Lead I and Lead II
         t1 = extract_median_beat(c1, p1)
         t2 = extract_median_beat(c2, p2)
         
         if t1 is not None and t2 is not None:
+            # Einthoven's Triangle Equations applied point-by-point to the aligned templates
             t3 = t2 - t1
             t_avr = -(t1 + t2) / 2.0
             t_avl = t1 - (t2 / 2.0)
             t_avf = t2 - (t1 / 2.0)
             
+            # Return the synthesized 4-second strips of the derived leads
             return synth_signal(t3, length), synth_signal(t_avr, length), synth_signal(t_avl, length), synth_signal(t_avf, length)
             
     except Exception:
