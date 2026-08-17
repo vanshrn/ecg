@@ -35,17 +35,14 @@ def extract_median_beat(data, peaks, pre_samples=75, post_samples=125):
     return None
 
 def synthesize_signal(template, total_samples=1000, rr_interval=200):
-    synth = np.zeros(total_samples)
-    template_len = len(template)
+    synth = np.zeros(total_samples + len(template) + rr_interval)
     pre_samples = 75
     
-    for i in range(100, total_samples, rr_interval):
+    for i in range(100, total_samples + rr_interval, rr_interval):
         start_idx = i - pre_samples
-        end_idx = start_idx + template_len
-        
-        if start_idx >= 0 and end_idx < total_samples:
-            synth[start_idx:end_idx] = template
-    return synth
+        if start_idx >= 0 and start_idx < total_samples:
+            synth[start_idx : start_idx + len(template)] = template
+    return synth[:total_samples]
 
 def fix_and_regenerate_templates(folder_path):
     data = {}

@@ -43,11 +43,12 @@ def calculate_derived_leads(l1, l2):
             return np.median(beats, axis=0) if len(beats) > 0 else None
             
         def synth_signal(template, total_len, pre=75, rr=200):
-            synth = np.zeros(total_len)
-            for i in range(100, total_len, rr):
-                if i - pre >= 0 and i - pre + len(template) < total_len:
-                    synth[i - pre : i - pre + len(template)] = template
-            return synth
+            synth = np.zeros(total_len + len(template) + rr)
+            for i in range(100, total_len + rr, rr):
+                start_idx = i - pre
+                if start_idx >= 0 and start_idx < total_len:
+                    synth[start_idx : start_idx + len(template)] = template
+            return synth[:total_len]
             
         t1 = extract_median_beat(c1, p1)
         t2 = extract_median_beat(c2, p2)
