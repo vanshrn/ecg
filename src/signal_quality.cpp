@@ -116,17 +116,22 @@ PerformanceMetrics calculateBatchMetrics(
 
 void printMetricsToSerial(unsigned long seq, const PerformanceMetrics &metrics)
 {
-    Serial.println("\n================= ECG BATCH PERFORMANCE METRICS =================");
-    Serial.printf("Sequence Frame      : #%lu\n", seq);
-    Serial.printf("1. Waveform SNR     : %.2f dB (%s)   | Accuracy: %.1f%%\n",
-                  metrics.snrDb, metrics.snrDb > 12.0 ? "Clean" : "Noisy", metrics.snrAccuracy);
-    Serial.printf("2. R-Peak Accuracy  : %.1f %%\n",
-                  metrics.rPeakAccuracy);
-    Serial.printf("3. Heart Rate       : %.1f BPM          | Accuracy: %.1f%%\n",
-                  metrics.hrBpm, metrics.hrAccuracy);
-    Serial.printf("4. Baseline Wander  : %.2f mV           | Accuracy: %.1f%%\n",
-                  metrics.baselineWanderMv, metrics.baselineAccuracy);
-    Serial.printf("5. Motion Artifact  : %.2f (%s) | Accuracy: %.1f%%\n",
-                  metrics.motionArtifactIndex, metrics.motionArtifactIndex > 0.30 ? "High Motion" : "Low Motion", metrics.motionAccuracy);
-    Serial.println("=================================================================\n");
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+        "\n================= ECG BATCH PERFORMANCE METRICS =================\n"
+        "Sequence Frame      : #%lu\n"
+        "1. Waveform SNR     : %.2f dB (%s)   | Accuracy: %.1f%%\n"
+        "2. R-Peak Accuracy  : %.1f %%\n"
+        "3. Heart Rate       : %.1f BPM          | Accuracy: %.1f%%\n"
+        "4. Baseline Wander  : %.2f mV           | Accuracy: %.1f%%\n"
+        "5. Motion Artifact  : %.2f (%s) | Accuracy: %.1f%%\n"
+        "=================================================================\n",
+        seq,
+        metrics.snrDb, metrics.snrDb > 12.0 ? "Clean" : "Noisy", metrics.snrAccuracy,
+        metrics.rPeakAccuracy,
+        metrics.hrBpm, metrics.hrAccuracy,
+        metrics.baselineWanderMv, metrics.baselineAccuracy,
+        metrics.motionArtifactIndex, metrics.motionArtifactIndex > 0.30 ? "High Motion" : "Low Motion", metrics.motionAccuracy
+    );
+    Serial.print(buf);
 }

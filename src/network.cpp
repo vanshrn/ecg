@@ -57,19 +57,14 @@ void networkWorkerTask(void* pvParameters) {
 
         int httpResponseCode = http.POST(jsonPayload);
 
-        // Updated log print to include timestamp in seconds
-        Serial.print("[API POST @ ");
-        Serial.print(item.timestampMs / 1000);
-        Serial.print("s] Seq: #");
-        Serial.print(item.seq);
-        Serial.print(" | Code: ");
-        Serial.print(httpResponseCode);
+        // Updated log print to use a single String to prevent serial interleaving with Core 1
+        String logMsg = "[API POST @ " + String(item.timestampMs / 1000) + "s] Seq: #" + String(item.seq) + " | Code: " + String(httpResponseCode);
         if (httpResponseCode >= 200 && httpResponseCode < 300) {
-          Serial.println(" [SUCCESS]");
+          logMsg += " [SUCCESS]";
         } else {
-          Serial.print(" [ERROR] ");
-          Serial.println(http.errorToString(httpResponseCode));
+          logMsg += " [ERROR] " + http.errorToString(httpResponseCode);
         }
+        Serial.println(logMsg);
 
         http.end();
       }

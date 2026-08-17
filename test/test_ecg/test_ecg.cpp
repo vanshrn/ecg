@@ -1,91 +1,284 @@
 #include <Arduino.h>
 
-#define ECG_PIN  34
-#define LO_PLUS  33
-#define LO_MINUS 32
+#define ECG_PIN   34
+#define LO_PLUS   33
+#define LO_MINUS  32
 
-const int SAMPLE_INTERVAL_US = 4000; // 250 Hz (exact 4ms sample timing)
+// =====================================================
+// MODE SELECTION
+// =====================================================
+bool isLiveMode = true;
+int injectedRawSample = 0;
+
+void handleSerialCommands() {
+  while (Serial.available() > 0) {
+    char buf[64];
+    size_t len = Serial.readBytesUntil('\n', buf, sizeof(buf) - 1);
+    buf[len] = '\0';
+    
+    String input = String(buf);
+    input.trim();
+
+    if (input.equalsIgnoreCase("mode recorded")) {
+      isLiveMode = false;
+      Serial.println("\n[SYSTEM MODE] Switched to RECORDED CSV Feed Input.");
+    }
+    else if (input.equalsIgnoreCase("mode live")) {
+      isLiveMode = true;
+      Serial.println("\n[SYSTEM MODE] Switched to LIVE ADC Input.");
+    }
+    else if (!isLiveMode) {
+      if (input.startsWith("sample,")) {
+        injectedRawSample = input.substring(7).toInt();
+      } else {
+        injectedRawSample = input.toInt();
+      }
+    }
+  }
+}
+
+// =====================================================
+// SAMPLING
+// =====================================================
+
+const unsigned long SAMPLE_INTERVAL_US = 4000; // 250 Hz
 unsigned long lastSample = 0;
 
-// --- Your Original Proven Filter Constants ---
-float emaValue = 0;
-const float EMA_ALPHA = 0.18; // Fast low-pass response
 
-float hpPrevRaw = 0;
-float hpPrevOut = 0;
-const float HP_ALPHA = 0.995; // Flattens baseline without phase distortion
+// =====================================================
+// ECG FILTER SETTINGS
+// Approximate ECG monitoring band: 0.5 - 40 Hz
+// =====================================================
 
-// --- 50Hz Notch Filter (Mains Hum Removal) ---
-float notch_x1 = 0, notch_x2 = 0;
-float notch_y1 = 0, notch_y2 = 0;
-const float notch_b0 = 0.9518, notch_b1 = -0.5883, notch_b2 = 0.9518;
-const float notch_a1 = -0.5871, notch_a2 = 0.9025;
+// -------- High-pass filter --------
+// Removes baseline wander / DC drift
+float hp_x1 = 0.0;
+float hp_y1 = 0.0;
+
+// fc ≈ 0.5 Hz at fs = 250 Hz
+const float HP_ALPHA = 0.9875;
+
+
+// -------- Low-pass filter --------
+// Two-stage EMA for smoother ECG while preserving QRS
+float lp1 = 0.0;
+float lp2 = 0.0;
+
+// Approximate low-pass behaviour for balanced noise reduction
+const float LP_ALPHA = 0.45;
+
+
+// =====================================================
+// 50 Hz NOTCH FILTER
+// =====================================================
+
+const bool USE_NOTCH = true;
+
+float notch_x1 = 0.0;
+float notch_x2 = 0.0;
+float notch_y1 = 0.0;
+float notch_y2 = 0.0;
+
+// 250 Hz sampling, 50 Hz notch
+// Narrow notch around mains frequency
+const float b0 = 0.9587;
+const float b1 = -0.5922;
+const float b2 = 0.9587;
+
+const float a1 = -0.5922;
+const float a2 = 0.9174;
+
+
+// =====================================================
+// LEAD-OFF STATE
+// =====================================================
 
 bool wasOff = false;
 
-float applyNotch(float x) {
-  float y = notch_b0 * x + notch_b1 * notch_x1 + notch_b2 * notch_x2
-            - notch_a1 * notch_y1 - notch_a2 * notch_y2;
-  notch_x2 = notch_x1; notch_x1 = x;
-  notch_y2 = notch_y1; notch_y1 = y;
+
+// =====================================================
+// NOTCH FUNCTION
+// =====================================================
+
+float applyNotch(float x)
+{
+  float y =
+    b0 * x
+    + b1 * notch_x1
+    + b2 * notch_x2
+    - a1 * notch_y1
+    - a2 * notch_y2;
+
+  notch_x2 = notch_x1;
+  notch_x1 = x;
+
+  notch_y2 = notch_y1;
+  notch_y1 = y;
+
   return y;
 }
 
-int readOversampled(int pin, int samples) {
+
+// =====================================================
+// OVERSAMPLED ADC
+// =====================================================
+
+int readOversampled(int pin, int samples)
+{
   long sum = 0;
-  for (int i = 0; i < samples; i++) sum += analogRead(pin);
+
+  for (int i = 0; i < samples; i++)
+  {
+    sum += analogRead(pin);
+  }
+
   return (int)(sum / samples);
 }
 
-void setup() {
-  Serial.begin(115200);
-  pinMode(LO_PLUS, INPUT);
-  pinMode(LO_MINUS, INPUT);
-  analogReadResolution(12);
+
+// =====================================================
+// RESET FILTERS
+// =====================================================
+
+void resetFilters(float value)
+{
+  hp_x1 = value;
+  hp_y1 = 0;
+
+  lp1 = 0;
+  lp2 = 0;
+
+  notch_x1 = 0;
+  notch_x2 = 0;
+  notch_y1 = 0;
+  notch_y2 = 0;
 }
 
-void loop() {
-  unsigned long now = micros();
-  if (now - lastSample >= (unsigned long)SAMPLE_INTERVAL_US) {
-    lastSample = now;
 
-    // Fast lead-off check
-    if ((digitalRead(LO_PLUS) == 1) || (digitalRead(LO_MINUS) == 1)) {
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup()
+{
+  Serial.begin(115200);
+
+  pinMode(LO_PLUS, INPUT);
+  pinMode(LO_MINUS, INPUT);
+
+  analogReadResolution(12);
+
+  // ESP32 ADC range
+  analogSetAttenuation(ADC_11db);
+
+  lastSample = micros();
+}
+
+
+// =====================================================
+// MAIN LOOP
+// =====================================================
+
+void loop()
+{
+  handleSerialCommands();
+
+  unsigned long now = micros();
+
+  if ((unsigned long)(now - lastSample) >= SAMPLE_INTERVAL_US)
+  {
+    lastSample += SAMPLE_INTERVAL_US;
+
+
+    // =================================================
+    // LEADS-OFF DETECTION (Live Mode Only)
+    // =================================================
+
+    if (isLiveMode && (digitalRead(LO_PLUS) || digitalRead(LO_MINUS)))
+    {
       wasOff = true;
-      Serial.print(">raw:0\n>filtered:0\n");
+
+      Serial.println(">off:1");
+
       return;
     }
 
-    int raw = readOversampled(ECG_PIN, 4);
 
-    // Reset filter states immediately on reconnect to prevent startup spikes
-    if (wasOff) {
-      emaValue = raw; 
-      hpPrevRaw = raw; 
-      hpPrevOut = 0;
-      notch_x1 = notch_x2 = notch_y1 = notch_y2 = 0;
+    // =================================================
+    // READ ECG
+    // =================================================
+
+    int rawADC = 0;
+    if (isLiveMode) {
+      rawADC = readOversampled(ECG_PIN, 4);
+    } else {
+      rawADC = injectedRawSample;
+    }
+
+    float raw = (float)rawADC;
+
+
+    // =================================================
+    // RESET FILTER AFTER ELECTRODE RECONNECT
+    // =================================================
+
+    if (wasOff)
+    {
+      resetFilters(raw);
+
       wasOff = false;
     }
 
-    // Stage 1: Low-pass EMA (fast & zero lag)
-    emaValue = (EMA_ALPHA * raw) + ((1 - EMA_ALPHA) * emaValue);
 
-    // Stage 2: High-pass (removes baseline drift)
-    float hpOut = HP_ALPHA * (hpPrevOut + emaValue - hpPrevRaw);
-    hpPrevRaw = emaValue;
-    hpPrevOut = hpOut;
+    // =================================================
+    // HIGH-PASS FILTER (Bypassed)
+    // Retains raw DC offset for 1:1 coordinate matching
+    // =================================================
 
-    // Stage 3: 50Hz Notch filter
-    float notchOut = applyNotch(hpOut);
+    float hp = raw;
 
-    // Center output at 2048
-    int output = (int)(notchOut + 2048);
-    output = constrain(output, 0, 4095);
+    hp_x1 = raw;
+    hp_y1 = hp;
 
-    // Fast Teleplot stream
+
+    // =================================================
+    // LOW-PASS FILTER
+    // Removes high-frequency noise
+    // =================================================
+
+    lp1 =
+      LP_ALPHA * hp +
+      (1.0 - LP_ALPHA) * lp1;
+
+    lp2 =
+      LP_ALPHA * lp1 +
+      (1.0 - LP_ALPHA) * lp2;
+
+
+    // =================================================
+    // 50 Hz NOTCH
+    // =================================================
+
+    float filtered;
+
+    if (USE_NOTCH)
+    {
+      filtered = applyNotch(lp2);
+    }
+    else
+    {
+      filtered = lp2;
+    }
+
+
+    // =================================================
+    // OUTPUT
+    // =================================================
+
     Serial.print(">raw:");
-    Serial.print(raw);
+    Serial.print(rawADC);
+
     Serial.print("\n>filtered:");
-    Serial.println(output);
+    Serial.println(filtered, 2);
   }
 }

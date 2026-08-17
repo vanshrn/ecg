@@ -4,8 +4,36 @@
 #include "buzzer.h"
 #include "led_status.h"
 #include "network.h"
-#include "ecg_processor.h"
+#include "spandan.h"
 #include "signal_quality.h"
+
+// ---------------------------------------------------------------------------
+// DSP Filter & State Variables
+// ---------------------------------------------------------------------------
+static float emaValue = 2048.0;
+static float hpPrevRaw = 2048.0, hpPrevOut = 0.0;
+
+static float notch_x1 = 0, notch_x2 = 0, notch_y1 = 0, notch_y2 = 0;
+const float notch_b0 = 0.9598, notch_b1 = 1.5529, notch_b2 = 0.9598;
+const float notch_a1 = 1.5529, notch_a2 = 0.9195;
+
+static bool wasOff = false;
+static bool currentLeadsOff = false;
+static int leadOffConsecutiveCounter = 0;
+
+static float applyNotch(float x) {
+  float y = notch_b0 * x + notch_b1 * notch_x1 + notch_b2 * notch_x2
+            - notch_a1 * notch_y1 - notch_a2 * notch_y2;
+  notch_x2 = notch_x1; notch_x1 = x;
+  notch_y2 = notch_y1; notch_y1 = y;
+  return y;
+}
+
+static int readOversampled(int pin, int samples) {
+  long sum = 0;
+  for (int i = 0; i < samples; i++) sum += analogRead(pin);
+  return (int)(sum / samples);
+}
 
 // Definition of Global Config Variables
 const char* USER_ID      = "user_vansh";
@@ -22,8 +50,6 @@ int ecgRawBuffer[SPS];
 int batchIndex = 0;
 int lastBatchBeats = 0;
 unsigned long sequenceNumber = 1;
-
-extern int totalBeatsDetected;
 
 // Timing Globals
 unsigned long lastAlertTime = 0;
@@ -47,7 +73,10 @@ void handleSerialCommands() {
     } 
     else if (input.equalsIgnoreCase("mode recorded")) {
       isLiveMode = false;
-      resetECGFilters(2048, micros()); // Reset state so no-beat timer starts from NOW
+      emaValue = 2048; hpPrevRaw = 2048; hpPrevOut = 0;
+      notch_x1 = notch_x2 = notch_y1 = notch_y2 = 0;
+      wasOff = false;
+      resetSpandanFilters(2048, micros()); // Reset state so no-beat timer starts from NOW
       Serial.println("\n[SYSTEM MODE] Switched to RECORDED CSV Feed Input.");
     }
     else if (!isLiveMode) {
@@ -110,8 +139,8 @@ void loop() {
       if (leadOffConsecutiveCounter >= 15) {
         currentLeadsOff = true;
         wasOff = true;
-        currentSeverity = "WARNING";
-        currentDiagnosis = "Leads Disconnected";
+        spandan_currentSeverity = "WARNING";
+        spandan_currentDiagnosis = "Leads Disconnected";
         
         if (nowMs - lastAlertTime >= ALERT_COOLDOWN_MS) {
           lastAlertTime = nowMs;
@@ -123,7 +152,7 @@ void loop() {
 
         if (batchIndex >= SPS) {
           batchIndex = 0;
-          upload1SecBatchToAPI(ecgBatchBuffer, SPS, currentLeadsOff, currentSeverity, currentDiagnosis);
+          upload1SecBatchToAPI(ecgBatchBuffer, SPS, currentLeadsOff, spandan_currentSeverity, spandan_currentDiagnosis);
         }
         return; 
       }
@@ -136,7 +165,12 @@ void loop() {
     }
 
     if (wasOff) {
-      resetECGFilters(raw, nowUs);
+      emaValue = raw;
+      hpPrevRaw = raw;
+      hpPrevOut = 0;
+      notch_x1 = notch_x2 = notch_y1 = notch_y2 = 0;
+      wasOff = false;
+      resetSpandanFilters(raw, nowUs);
     }
 
     // DSP Filtering Pipeline
@@ -148,14 +182,14 @@ void loop() {
     int output = (int)(notchOut + 2048);
     output = constrain(output, 0, 4095);
 
-    processBeatFeatures(output, nowUs);
+    processSpandanFeatures(output, nowUs);
 
-    if (currentSeverity == "NORMAL" && (nowMs - lastNormalPrintTime >= NORMAL_PRINT_INTERVAL_MS)) {
+    if (spandan_currentSeverity == "NORMAL" && (nowMs - lastNormalPrintTime >= NORMAL_PRINT_INTERVAL_MS)) {
       lastNormalPrintTime = nowMs;
       Serial.print("[INFO @ ");
       Serial.print(nowMs / 1000);
       Serial.print("s] Rhythm: NORMAL | BPM: ");
-      Serial.println(features.bpm, 1);
+      Serial.println(spandan_features.bpm, 1);
     }
 
     ecgRawBuffer[batchIndex] = raw;
@@ -165,13 +199,15 @@ void loop() {
     if (batchIndex >= SPS) {
       batchIndex = 0;
       
-      int peakCount = totalBeatsDetected - lastBatchBeats;
-      lastBatchBeats = totalBeatsDetected;
+      int peakCount = spandan_totalBeatsDetected - lastBatchBeats;
+      lastBatchBeats = spandan_totalBeatsDetected;
       
-      PerformanceMetrics metrics = calculateBatchMetrics(ecgRawBuffer, ecgBatchBuffer, SPS, features.bpm, peakCount);
-      printMetricsToSerial(sequenceNumber++, metrics);
+      PerformanceMetrics metrics = calculateBatchMetrics(ecgRawBuffer, ecgBatchBuffer, SPS, spandan_features.bpm, peakCount);
+      printMetricsToSerial(sequenceNumber, metrics);
+      printWaveformMetricsToSerial(sequenceNumber, spandan_features);
+      sequenceNumber++;
 
-      upload1SecBatchToAPI(ecgBatchBuffer, SPS, currentLeadsOff, currentSeverity, currentDiagnosis);
+      upload1SecBatchToAPI(ecgBatchBuffer, SPS, currentLeadsOff, spandan_currentSeverity, spandan_currentDiagnosis);
     }
   }
 }

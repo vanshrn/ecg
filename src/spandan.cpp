@@ -1,14 +1,15 @@
 #include "spandan.h"
 #include <Arduino.h>
+#include "config.h"
 
 #define RR_HIST_LEN 8
 static int spandan_rrHistory[RR_HIST_LEN] = {0, 0, 0, 0, 0, 0, 0, 0};
 static int spandan_rrHistIdx = 0;
-static int spandan_totalBeatsDetected = 0;
+int spandan_totalBeatsDetected = 0;
 
-static String spandan_currentSeverity = "NORMAL";
-static String spandan_currentDiagnosis = "Normal Sinus Rhythm";
-static SpandanFeatures spandan_features;
+String spandan_currentSeverity = "NORMAL";
+String spandan_currentDiagnosis = "Normal Sinus Rhythm";
+SpandanFeatures spandan_features;
 
 static unsigned long spandan_lastBeatTimeUs = 0;
 static unsigned long spandan_lastAlertTime = 0;
@@ -19,7 +20,7 @@ static int spandan_consecutivePVCs = 0;
 static int spandan_consecutivePACs = 0;
 
 // Ring buffer for morphological analysis
-#define BUF_SIZE 1024 // ~2.8 seconds at 360Hz
+#define BUF_SIZE 1024 // ~2.8 seconds at 125Hz
 static int beat_buffer[BUF_SIZE];
 static int buf_idx = 0;
 static int spandan_globalSampleIdx = 0;
@@ -148,18 +149,33 @@ void classifySpandanECG(SpandanFeatures feat) {
     Serial.print(" - ");
     Serial.print(spandan_currentDiagnosis);
     Serial.print(" | BPM:");
-    Serial.print(feat.bpm, 0);
-    Serial.print(" PR:");
-    Serial.print(feat.prInterval);
-    Serial.print(" QRS:");
-    Serial.print(feat.qrsWidth);
-    Serial.print(" ST:");
-    Serial.print(feat.stSegment, 0);
-    Serial.print(" T:");
-    Serial.print(feat.tAmp, 0);
-    Serial.print(" R:");
-    Serial.println(feat.rAmp, 0);
+    Serial.println(feat.bpm, 0);
   }
+}
+
+void printWaveformMetricsToSerial(unsigned long seq, const SpandanFeatures &feat) {
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+        "\n==================== WAVEFORM METRICS ===================\n"
+        "Sequence Frame      : #%lu\n"
+        "1. PR Interval      : %d ms\n"
+        "2. QRS Width        : %d ms\n"
+        "3. QT Interval      : %d ms\n"
+        "4. QTc Interval     : %d ms\n"
+        "5. ST Segment Amp   : %.0f ADC\n"
+        "6. T-Wave Amp       : %.0f ADC\n"
+        "7. R-Peak Amp       : %.0f ADC\n"
+        "=========================================================\n",
+        seq,
+        feat.prInterval,
+        feat.qrsWidth,
+        feat.qtInterval,
+        feat.qtcInterval,
+        feat.stSegment,
+        feat.tAmp,
+        feat.rAmp
+    );
+    Serial.print(buf);
 }
 
 void analyzeBeat() {
@@ -167,7 +183,7 @@ void analyzeBeat() {
   // The true R-peak is a local maximum slightly after the crossing.
   // Scan forward up to 40ms (14 samples) to find the true R peak.
   // Increase to 80ms to ensure we don't fall short if we trigger early on a WPW Delta Wave
-  int search_r_samples = (80 * 360) / 1000;
+  int search_r_samples = (80 * SPS) / 1000;
   float true_r_amp = getBufVal(analysis_r_idx) - 2048.0;
   int true_r_idx = analysis_r_idx;
   for(int i = 1; i <= search_r_samples; i++) {
@@ -183,7 +199,7 @@ void analyzeBeat() {
   spandan_features.rAmp = true_r_amp;
   
   // Q Amp (min in 60ms before R)
-  int search_q_samples = (60 * 360) / 1000;
+  int search_q_samples = (60 * SPS) / 1000;
   float min_q = 0;
   int q_idx = analysis_r_idx;
   for(int i=1; i<=search_q_samples; i++) {
@@ -193,7 +209,7 @@ void analyzeBeat() {
   spandan_features.qAmp = min_q;
   
   // S Amp (min in 80ms after R)
-  int search_s_samples = (80 * 360) / 1000;
+  int search_s_samples = (80 * SPS) / 1000;
   float min_s = 0;
   int s_idx = analysis_r_idx;
   for(int i=1; i<=search_s_samples; i++) {
@@ -208,31 +224,53 @@ void analyzeBeat() {
   int qrs_end = s_idx;
   while(qrs_end > analysis_r_idx && (getBufVal(qrs_end) - 2048.0) > -15 && (getBufVal(qrs_end) - 2048.0) < 15) qrs_end--;
   
-  spandan_features.qrsWidth = ((s_idx - q_idx) * 1000) / 360;
+  spandan_features.qrsWidth = ((s_idx - q_idx) * 1000) / SPS;
   spandan_features.isWide = (spandan_features.qrsWidth >= 100);
   
   // ST Segment (measure 60ms after S wave)
-  int st_measure_idx = s_idx + ((60 * 360) / 1000);
+  int st_measure_idx = s_idx + ((60 * SPS) / 1000);
   spandan_features.stSegment = getBufVal(st_measure_idx) - 2048.0;
   
   // T wave (max absolute value between 120ms and 300ms after R)
-  int t_start = analysis_r_idx + ((120 * 360) / 1000);
-  int t_end = analysis_r_idx + ((300 * 360) / 1000);
+  int t_start = analysis_r_idx + ((120 * SPS) / 1000);
+  int t_end = analysis_r_idx + ((300 * SPS) / 1000);
   float max_t = 0;
+  int t_peak_idx = t_start;
   for(int i=t_start; i<=t_end; i++) {
     float val = getBufVal(i) - 2048.0;
-    if(abs(val) > abs(max_t)) max_t = val;
+    if(abs(val) > abs(max_t)) {
+        max_t = val;
+        t_peak_idx = i;
+    }
   }
   spandan_features.tAmp = max_t;
   
-  // P wave (max in 400ms to 60ms before R)
-  int p_start = analysis_r_idx - ((400 * 360) / 1000);
-  int current_rr_samples = (spandan_features.rrInterval * 360) / 1000;
-  if (current_rr_samples > 0 && current_rr_samples < ((500 * 360) / 1000)) {
-    p_start = analysis_r_idx - ((180 * 360) / 1000); // Narrow search for tachycardia
+  // Find End of T-wave for QT Interval
+  int t_end_idx = t_peak_idx;
+  int max_t_search = t_peak_idx + ((120 * SPS) / 1000);
+  while(t_end_idx < max_t_search) {
+    float val = getBufVal(t_end_idx) - 2048.0;
+    if(abs(val) < 15.0) break;
+    t_end_idx++;
+  }
+  spandan_features.qtInterval = ((t_end_idx - q_idx) * 1000) / SPS;
+  
+  // Calculate QTc (Bazett's Formula: QTc = QT / sqrt(RR_in_seconds))
+  if (spandan_features.rrInterval > 0) {
+      float rr_seconds = spandan_features.rrInterval / 1000.0f;
+      spandan_features.qtcInterval = (int)(spandan_features.qtInterval / sqrt(rr_seconds));
+  } else {
+      spandan_features.qtcInterval = 0;
   }
   
-  int p_end = analysis_r_idx - ((60 * 360) / 1000);
+  // P wave (max in 400ms to 60ms before R)
+  int p_start = analysis_r_idx - ((400 * SPS) / 1000);
+  int current_rr_samples = (spandan_features.rrInterval * SPS) / 1000;
+  if (current_rr_samples > 0 && current_rr_samples < ((500 * SPS) / 1000)) {
+    p_start = analysis_r_idx - ((180 * SPS) / 1000); // Narrow search for tachycardia
+  }
+  
+  int p_end = analysis_r_idx - ((60 * SPS) / 1000);
   float max_p = 0;
   int p_peak_idx = p_start;
   for(int i=p_start; i<=p_end; i++) {
@@ -242,7 +280,7 @@ void analyzeBeat() {
   
   spandan_features.pWavePresent = (max_p > 35.0);
   if (spandan_features.pWavePresent) {
-    spandan_features.prInterval = ((analysis_r_idx - p_peak_idx) * 1000) / 360;
+    spandan_features.prInterval = ((analysis_r_idx - p_peak_idx) * 1000) / SPS;
   } else {
     spandan_features.prInterval = 0;
   }
@@ -278,7 +316,7 @@ void processSpandanFeatures(int filteredVal, unsigned long nowUs) {
 
   // Strict time-based lockout: 250ms after the last beat
   // Calculate exact theoretical time based on sample count to avoid USB jitter
-  unsigned long exactNowUs = (unsigned long)((spandan_globalSampleIdx * 1000000ULL) / 360ULL);
+  unsigned long exactNowUs = (unsigned long)((spandan_globalSampleIdx * 1000000ULL) / (unsigned long long)SPS);
   
   if (spandan_lastBeatTimeUs > 0 && (exactNowUs - spandan_lastBeatTimeUs < 250000)) {
     spandan_peakLockout = true;
@@ -335,7 +373,7 @@ void processSpandanFeatures(int filteredVal, unsigned long nowUs) {
   if (analysis_pending) {
     samples_since_r++;
     // Wait until we have 300ms of data AFTER the R-peak to analyze S, ST, and T waves
-    if (samples_since_r >= (300 * 360) / 1000) {
+    if (samples_since_r >= (300 * SPS) / 1000) {
       analyzeBeat();
       analysis_pending = false;
     }

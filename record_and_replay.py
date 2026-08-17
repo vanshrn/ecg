@@ -23,7 +23,7 @@ if not os.path.exists(RECORDINGS_DIR):
 
 # Shared Data Buffers for Plotting
 raw_buffer = collections.deque([0] * MAX_PLOT_SAMPLES, maxlen=MAX_PLOT_SAMPLES)
-filt_buffer = collections.deque([2048] * MAX_PLOT_SAMPLES, maxlen=MAX_PLOT_SAMPLES)
+filt_buffer = collections.deque([0] * MAX_PLOT_SAMPLES, maxlen=MAX_PLOT_SAMPLES)
 
 recording = False
 file_handle = None
@@ -154,14 +154,12 @@ def run_live_plot():
     fig.canvas.manager.set_window_title(title_str)
 
     line_raw, = ax1.plot(raw_buffer, color='orange', label='Raw Signal')
-    ax1.set_ylim(1500, 2800)
     ax1.set_ylabel('ADC Raw')
     ax1.grid(True, linestyle='--', alpha=0.5)
     ax1.legend(loc='upper right')
 
     line_filt, = ax2.plot(filt_buffer, color='cyan', label='Filtered Signal')
-    ax2.set_ylim(1500, 2600)
-    ax2.set_ylabel('Filtered (Centered 2048)')
+    ax2.set_ylabel('Filtered Signal')
     ax2.set_xlabel('Samples (Rolling 2 Seconds)')
     ax2.grid(True, linestyle='--', alpha=0.5)
     ax2.legend(loc='upper right')
@@ -169,6 +167,32 @@ def run_live_plot():
     def update_fig(frame):
         line_raw.set_ydata(raw_buffer)
         line_filt.set_ydata(filt_buffer)
+        
+        # Dynamic Y-axis scaling for Raw
+        try:
+            # Fixed zoom level (span)
+            fixed_span = 1000.0
+            
+            # Calculate the current 2-second baseline center
+            r_center = sum(raw_buffer) / len(raw_buffer)
+            
+            # Only update Raw Y-axis if it drifts significantly (prevents jitter)
+            current_r_ylim = ax1.get_ylim()
+            current_r_center = (current_r_ylim[0] + current_r_ylim[1]) / 2.0
+            if abs(r_center - current_r_center) > 150 or (current_r_ylim[1] - current_r_ylim[0]) != fixed_span:
+                ax1.set_ylim(r_center - (fixed_span / 2.0), r_center + (fixed_span / 2.0))
+            
+            # Calculate the current Filtered 2-second baseline center
+            f_center = sum(filt_buffer) / len(filt_buffer)
+            
+            # Only update Filtered Y-axis if it drifts significantly
+            current_f_ylim = ax2.get_ylim()
+            current_f_center = (current_f_ylim[0] + current_f_ylim[1]) / 2.0
+            if abs(f_center - current_f_center) > 150 or (current_f_ylim[1] - current_f_ylim[0]) != fixed_span:
+                ax2.set_ylim(f_center - (fixed_span / 2.0), f_center + (fixed_span / 2.0))
+                
+        except Exception:
+            pass
         
         if mode == "1":
             if recording:

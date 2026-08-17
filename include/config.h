@@ -13,12 +13,12 @@ extern const char* WIFI_PASSWORD;
 extern const char* API_ENDPOINT;
 
 // System Configurations
-constexpr int SPS = 360;
-constexpr unsigned long SAMPLE_INTERVAL_US = 2777; // 360 SPS timing
+constexpr int SPS = 125;
+constexpr unsigned long SAMPLE_INTERVAL_US = 8000; // 125 SPS timing
 
 // DSP Filter Constants
-constexpr float EMA_ALPHA = 0.22f;
-constexpr float HP_ALPHA = 0.996f;
+constexpr float EMA_ALPHA = 0.39f;   // Recalculated for ~12.5Hz Low-Pass cutoff at 125 SPS
+constexpr float HP_ALPHA = 0.988f;   // Recalculated for ~0.23Hz High-Pass cutoff at 125 SPS
 
 // System Cooldown Timers
 constexpr unsigned long ALERT_COOLDOWN_MS = 2000;
