@@ -76,3 +76,35 @@ class ECGFilter:
         self.zi_lp_state = self.zi_lp * 0.0
         if self.notch_enabled:
             self.zi_notch_state = self.zi_notch * 0.0
+
+
+# ──────────────────────────────────────────────
+# BATCH FILTER FUNCTIONS (mirror of report.py pipeline)
+# Applied on the full buffered array for display — not stored to disk.
+# ──────────────────────────────────────────────
+
+def remove_baseline_wander(data_mv, fs: float = 250.0):
+    """
+    Zero-phase high-pass at 0.05 Hz to remove baseline wander.
+    Clinical standard: prevents ST segment elevation/depression distortion.
+    """
+    nyq = 0.5 * fs
+    b_hp, a_hp = signal.butter(2, 0.05 / nyq, btype='highpass')
+    return signal.filtfilt(b_hp, a_hp, data_mv)
+
+
+def final_noise_filter(data_mv, fs: float = 250.0):
+    """
+    Final high-frequency denoising AFTER calculations.
+    Uses zero-phase Low-Pass (30 Hz Monitor Mode) + 50 Hz Notch + Savitzky-Golay polish.
+    """
+    nyq = 0.5 * fs
+    # Low-pass at 30 Hz ("Monitor Mode") — suppresses muscle tremor
+    b_lp, a_lp = signal.butter(2, 30.0 / nyq, btype='lowpass')
+    clean = signal.filtfilt(b_lp, a_lp, data_mv)
+    # Notch 50 Hz
+    b_notch, a_notch = signal.iirnotch(50.0 / nyq, 30.0)
+    clean = signal.filtfilt(b_notch, a_notch, clean)
+    # Savitzky-Golay polish to smooth remaining micro-jitter
+    clean = signal.savgol_filter(clean, window_length=11, polyorder=2)
+    return clean

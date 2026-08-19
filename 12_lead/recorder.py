@@ -5,12 +5,13 @@ import time
 import threading
 import collections
 from datetime import datetime
+import numpy as np
 import serial
 import serial.tools.list_ports
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-from filter import ECGFilter
+from filter import ECGFilter, remove_baseline_wander, final_noise_filter
 
 # ──────────────────────────────────────────────
 # CONFIG
@@ -141,8 +142,11 @@ class ECGRecorder:
         def update(_):
             with self.lock:
                 y_raw = list(self.buf_raw)
-                y_filt = list(self.buf_filtered)
                 done = not self.is_recording
+
+            # Apply the same report pipeline on the buffered raw data for display only — not stored
+            raw_arr = np.array(y_raw)
+            y_filt = final_noise_filter(remove_baseline_wander(raw_arr))
 
             line_raw.set_ydata(y_raw)
             line_filtered.set_ydata(y_filt)
